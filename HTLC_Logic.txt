@@ -1,0 +1,62 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+contract HTLC {
+    struct Lock {
+        address sender;
+        address receiver;
+        uint256 amount;
+        bytes32 hashlock; // SHA-256 hash of the secret
+        uint256 timelock; // UNIX timestamp
+        bool withdrawn;
+        bool refunded;
+    }
+    
+    mapping(bytes32 => Lock) public contracts;
+    
+    event LogHTLCNew(bytes32 indexed contractId, address indexed sender, address indexed receiver, uint256 amount, bytes32 hashlock, uint256 timelock);
+    event LogHTLCWithdraw(bytes32 indexed contractId);
+    event LogHTLCRefund(bytes32 indexed contractId);
+
+    /**
+     * @dev Sender creates the lock.
+     */
+    function fund(address _receiver, bytes32 _hashlock, uint256 _timelock) external payable returns (bytes32 contractId) {
+        require(_timelock > block.timestamp, "Timelock must be in the future");
+        contractId = keccak256(abi.encodePacked(msg.sender, _receiver, msg.value, _hashlock, _timelock));
+        
+        contracts[contractId] = Lock(msg.sender, _receiver, msg.value, _hashlock, _timelock, false, false);
+        emit LogHTLCNew(contractId, msg.sender, _receiver, msg.value, _hashlock, _timelock);
+    }
+
+    /**
+     * @dev Receiver claims funds by revealing the preimage.
+     */
+    function withdraw(bytes32 _contractId, string memory _preimage) external {
+        Lock storage l = contracts[_contractId];
+        require(l.amount > 0, "Contract not found");
+        require(!l.withdrawn, "Already withdrawn");
+        require(!l.refunded, "Already refunded");
+        require(l.timelock > block.timestamp, "Contract expired");
+        require(sha256(abi.encodePacked(_preimage)) == l.hashlock, "Invalid preimage");
+
+        l.withdrawn = true;
+        payable(l.receiver).transfer(l.amount);
+        emit LogHTLCWithdraw(_contractId);
+    }
+
+    /**
+     * @dev Sender reclaims funds after timeout.
+     */
+    function refund(bytes32 _contractId) external {
+        Lock storage l = contracts[_contractId];
+        require(l.amount > 0, "Contract not found");
+        require(!l.withdrawn, "Already withdrawn");
+        require(!l.refunded, "Already refunded");
+        require(block.timestamp >= l.timelock, "Timelock not yet expired");
+
+        l.refunded = true;
+        payable(l.sender).transfer(l.amount);
+        emit LogHTLCRefund(_contractId);
+    }
+}
