@@ -1,0 +1,43 @@
+// SPDX-License-Identifier: MIT
+pragma solidity ^0.8.0;
+
+import "./IIdentityRegistry.sol";
+import "./ICompliance.sol";
+import "@openzeppelin/contracts/token/ERC20/ERC20.sol";
+
+/**
+ * @title RegulatedToken (ERC-3643 Implementation)
+ * @dev Extends ERC20 with Identity Registry and Compliance checks.
+ */
+contract RegulatedToken is ERC20 {
+    IIdentityRegistry public identityRegistry;
+    ICompliance public compliance;
+
+    constructor(string memory name, string memory symbol, address _identityRegistry, address _compliance) 
+        ERC20(name, symbol) 
+    {
+        identityRegistry = IIdentityRegistry(_identityRegistry);
+        compliance = ICompliance(_compliance);
+    }
+
+    /**
+     * @dev Overridden transfer function to include compliance checks.
+     */
+    function _transfer(address sender, address recipient, uint256 amount) internal virtual override {
+        require(identityRegistry.isVerified(sender), "Sender Identity Invalid");
+        require(identityRegistry.isVerified(recipient), "Recipient Identity Invalid");
+        require(compliance.canTransfer(sender, recipient, amount), "Compliance Check Failed");
+
+        super._transfer(sender, recipient, amount);
+    }
+
+    /**
+     * @dev Administrative function to freeze funds for AML enforcement.
+     * Only callable by authorized agents (e.g., the Regulator or Issuer).
+     */
+    function setAddressStatus(address userAddress, bool isFrozen) external onlyAgent {
+        // Logic to freeze/unfreeze an address in the identity registry
+        identityRegistry.setFreezeStatus(userAddress, isFrozen);
+        emit AddressStatusChanged(userAddress, isFrozen);
+    }
+}
